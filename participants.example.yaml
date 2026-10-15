@@ -1,0 +1,17 @@
+# Copy to participants.yaml and replace the placeholder identities and wallets.
+# Use two different wallets in the same Privy app, authorized for the backend key.
+workspaceId: TWORKSPACE
+participants:
+  - name: Demo sender
+    slackUserId: UYOURUSER
+    email: null
+    walletId: replace-with-sender-wallet-id
+    address: "0x1111111111111111111111111111111111111111"
+
+  - name: Demo coworker
+    alias: demo
+    # Set a real Slack user ID to allow mentions, or keep null for the demo alias.
+    slackUserId: null
+    email: null
+    walletId: replace-with-recipient-wallet-id
+    address: "0x2222222222222222222222222222222222222222"
