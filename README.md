@@ -29,12 +29,24 @@ Replace the placeholders in `participants.yaml` with the Slack workspace ID, sen
 Run from the project directory so the participant configuration can be found:
 
 ```bash
-pnpm exec tsx --env-file=.env app.ts
+pnpm run build:ui
+pnpm start
 ```
+
+Open `https://<tunnel-host>/login` to view the React login page. Google login is not implemented yet. Rebuild the UI after frontend edits and restart the bot after backend edits.
+
+All UI source, configuration, and HTTP routing live under `ui/`. Vite writes its generated output to `ui/dist/`, which is ignored by Git. The frontend loads environment files only from `ui/`, keeping the backend's root `.env` separate.
 
 The HTTP server listens on port 3105. Configure the Slack slash command as `/tip`, enable escaping of mentions, disable Socket Mode, and set its request URL to `https://<tunnel-host>/slack/events`.
 
-On a Stripe devbox, the app uses `undici` to honor the outbound proxy environment. Run `pay tunnel` from the laptop, targeting the registered devbox service. Keep the webhook path exception scoped to `^/slack/events$`.
+On a Stripe devbox, the app uses `undici` to honor the outbound proxy environment. Run `pay tunnel` from the laptop, targeting the registered devbox service. Allow only the Slack callback, login page, and compiled asset paths:
+
+```bash
+pay tunnel create --devbox-name=<devbox-name> --service=<registered-service> \
+  --allow-paths-matching='^/(slack/events|login|assets/[^/]+)$' --replace
+```
+
+Browser routes use the same tunnel hostname as the Slack callback. The server serves only built UI files; backend source and local configuration have no browser routes.
 
 ## Try the demo
 
@@ -55,6 +67,19 @@ Balance responses are private. Successful tips post the appreciation message, be
 - `privy.ts`: Privy client and backend authorization context.
 - `wallets/balance.ts`: read OUSD balances with viem.
 - `wallets/transfer.ts`: submit sponsored Tempo transfers through Privy.
+- `ui/src/`: React page and styles.
+- `ui/vite.config.mts` and `ui/tsconfig.json`: frontend build and type checking.
+- `ui/server.ts`: login page and asset routes on the Bolt HTTP receiver.
+- `ui/server.test.ts`: HTTP coverage for UI routes and Slack signature verification.
+
+## Checks
+
+```bash
+pnpm run check:ui
+pnpm test
+```
+
+The HTTP test uses an isolated local server and generated test credentials. It does not call Slack, Privy, or the blockchain.
 
 ## Current limitations and next steps
 

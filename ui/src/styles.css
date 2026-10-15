@@ -1,0 +1,54 @@
+:root {
+  color-scheme: light;
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+  --background: Canvas;
+  --text: CanvasText;
+  --text-muted: GrayText;
+  --border: ButtonBorder;
+  color: var(--text);
+  background: var(--background);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+#root {
+  min-height: 100svh;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+}
+
+main {
+  width: min(100%, 28rem);
+  padding: 2rem;
+  border: 0.0625rem solid var(--border);
+  border-radius: 1rem;
+}
+
+h1 {
+  margin: 0.5rem 0 1rem;
+  font-size: 2rem;
+  line-height: 1.15;
+  letter-spacing: -0.0625rem;
+}
+
+.eyebrow,
+.status {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.eyebrow {
+  margin: 0;
+}
+
+.status {
+  margin-top: 2rem;
+}

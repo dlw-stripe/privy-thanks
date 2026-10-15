@@ -1,5 +1,6 @@
 import {App, type RespondFn, type SlashCommand} from '@slack/bolt';
 import {basename} from 'node:path';
+import {createUiReceiver} from './ui/server';
 import {formatUnits, parseUnits} from 'viem';
 import {EnvHttpProxyAgent, setGlobalDispatcher} from 'undici';
 import {getParticipant, getParticipantByAlias, type Participant} from './participants';
@@ -182,10 +183,13 @@ async function handleTip({command, respond}: CommandContext) {
 }
 
 async function main() {
+  const signingSecret = process.env.SLACK_SIGNING_SECRET;
+  if (!signingSecret) {
+    throw new Error('Missing SLACK_SIGNING_SECRET.');
+  }
   const app = new App({
     token: process.env.SLACK_BOT_TOKEN,
-    signingSecret: process.env.SLACK_SIGNING_SECRET,
-    socketMode: false,
+    receiver: createUiReceiver({signingSecret}),
   });
   app.command('/tip', async ({ack, command, respond}) => {
     await ack();
