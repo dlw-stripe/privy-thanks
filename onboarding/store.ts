@@ -1,8 +1,8 @@
-import {createHash, randomBytes} from 'node:crypto';
+import {createHash, randomBytes, randomUUID} from 'node:crypto';
 import {chmodSync, mkdirSync} from 'node:fs';
 import {dirname} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
-import {OnboardingError, type Participant, type SlackIdentity, type VerifiedWallet} from './types';
+import {OnboardingError, type Participant, type ResetRequest, type SlackAccount, type SlackIdentity, type VerifiedWallet} from './types';
 
 const LINK_LIFETIME_MILLISECONDS = 15 * 60 * 1000;
 type LinkRow = {
@@ -35,6 +35,11 @@ export class OnboardingStore {
         privy_user_id TEXT, wallet_id TEXT, consumed_at INTEGER
       );
       CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY);
+      CREATE TABLE IF NOT EXISTS onboarding_resets (
+        workspace_id TEXT NOT NULL, user_id TEXT NOT NULL,
+        operation_id TEXT NOT NULL, privy_user_id TEXT, wallet_id TEXT,
+        PRIMARY KEY (workspace_id, user_id)
+      );
     `);
   }
 
@@ -50,6 +55,44 @@ export class OnboardingStore {
 
   getParticipantByAlias({workspaceId, alias}: {workspaceId: string; alias: string}) {
     return this.readParticipant('alias', workspaceId, alias.toLowerCase());
+  }
+
+  getPendingReset({workspaceId, userId}: SlackAccount): ResetRequest | undefined {
+    const row = this.db.prepare('SELECT * FROM onboarding_resets WHERE workspace_id = ? AND user_id = ?')
+      .get(workspaceId, userId);
+    if (!row) return undefined;
+    return {operationId: String(row.operation_id), privyUserId: row.privy_user_id as string | null,
+      walletId: row.wallet_id as string | null};
+  }
+
+  /** Invalidate old links and freeze routing before calling Privy's delete API. */
+  beginReset(identity: SlackAccount): ResetRequest {
+    return this.transaction(() => {
+      const pending = this.getPendingReset(identity);
+      if (pending) return pending;
+      const participant = this.getParticipant(identity);
+      const target: ResetRequest = {operationId: randomUUID(), privyUserId: participant?.privyUserId ?? null,
+        walletId: participant?.walletId ?? null};
+      this.db.prepare(`INSERT INTO onboarding_resets
+        (workspace_id, user_id, operation_id, privy_user_id, wallet_id) VALUES (?, ?, ?, ?, ?)`)
+        .run(identity.workspaceId, identity.userId, target.operationId, target.privyUserId, target.walletId);
+      this.db.prepare('DELETE FROM login_links WHERE workspace_id = ? AND user_id = ?')
+        .run(identity.workspaceId, identity.userId);
+      return target;
+    });
+  }
+
+  /** Clear only this account after deletion succeeds; stale completions cannot clear a new login. */
+  finishReset({workspaceId, userId, operationId}: SlackAccount & {operationId: string}) {
+    this.transaction(() => {
+      if (this.getPendingReset({workspaceId, userId})?.operationId !== operationId) return;
+      this.db.prepare('DELETE FROM participants WHERE workspace_id = ? AND slack_user_id = ?')
+        .run(workspaceId, userId);
+      this.db.prepare('DELETE FROM login_links WHERE workspace_id = ? AND user_id = ?')
+        .run(workspaceId, userId);
+      this.db.prepare('DELETE FROM onboarding_resets WHERE workspace_id = ? AND user_id = ? AND operation_id = ?')
+        .run(workspaceId, userId, operationId);
+    });
   }
 
   /** Import existing demo wallets once; subsequent startups cannot overwrite links. */
@@ -73,6 +116,9 @@ export class OnboardingStore {
   issueLink(identity: SlackIdentity) {
     const token = randomBytes(32).toString('hex');
     this.transaction(() => {
+      if (this.getPendingReset(identity)) {
+        throw new OnboardingError(409, 'Reset is pending. Run /tip reset again to finish.');
+      }
       this.db.prepare('DELETE FROM login_links WHERE expires_at <= ? OR (workspace_id = ? AND user_id = ?)')
         .run(this.now(), identity.workspaceId, identity.userId);
       this.db.prepare(`INSERT INTO login_links (token_hash, workspace_id, user_id, name, expires_at)
@@ -125,7 +171,9 @@ export class OnboardingStore {
   }
 
   private readParticipant(column: 'slack_user_id' | 'alias', workspaceId: string, value: string): Participant | undefined {
-    const row = this.db.prepare(`SELECT * FROM participants WHERE workspace_id = ? AND ${column} = ?`)
+    const row = this.db.prepare(`SELECT * FROM participants WHERE workspace_id = ? AND ${column} = ?
+      AND NOT EXISTS (SELECT 1 FROM onboarding_resets WHERE onboarding_resets.workspace_id = participants.workspace_id
+        AND onboarding_resets.user_id = participants.slack_user_id)`)
       .get(workspaceId, value);
     if (!row) return undefined;
     return {

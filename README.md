@@ -69,6 +69,7 @@ Browser routes use the same tunnel hostname as the Slack callback. The server se
 
 ```text
 /tip login
+/tip reset
 /tip balance
 /tip balance demo
 /tip demo 1 Thanks for helping me onboard!
@@ -78,12 +79,22 @@ Browser routes use the same tunnel hostname as the Slack callback. The server se
 
 Balance responses are private. Successful tips post the appreciation message, before-and-after balances, and a Tempo testnet explorer link in the channel. The `demo` alias uses a plain label and does not notify a real Slack user.
 
+## Reset for a new demo run
+
+Run `/tip reset` to delete the calling Slack user's linked Privy user and clear that account's local wallet mapping and login links. It cannot target a coworker or the `demo` alias. On-chain balances and transaction history remain at the old address.
+
+After reset, log out of the browser login page, run `/tip login`, and log in with Google again. The new wallet needs its own testnet OUSD. Browser cookies are not cleared by a Slack command.
+
+Reset is blocked while the wallet is involved in a tip, including uncertain transfers awaiting verification. Deletion is performed before removing the saved mapping. A durable reset record blocks tipping and new links while deletion is pending. If Privy is unavailable or deletion times out, run `/tip reset` again; it retries the saved user ID, including after a bot restart. A user already deleted in the dashboard is treated as a completed deletion.
+
 ## Files
 
 - `app.ts`: Slack routing, balance and tip handlers, validation, and response formatting.
 - `participants.ts`: one-time import of legacy YAML and workspace-scoped SQLite lookups.
 - `onboarding/store.ts`: durable participant routing, expiring links, and atomic link completion.
 - `onboarding/verify-wallet.ts`: Privy access-token, Google identity, wallet ownership, and signer verification.
+- `onboarding/slack-reset.ts`: self-service reset command and active-tip guard.
+- `onboarding/delete-user.ts`: Privy deletion adapter with explicit retry handling.
 - `onboarding/routes.ts`: same-origin `/api/slack-link` prepare/complete handler.
 - `privy.ts`: Privy client and backend authorization context.
 - `wallets/balance.ts`: read OUSD balances with viem.

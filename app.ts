@@ -9,6 +9,9 @@ import {sendOusd} from './wallets/transfer';
 import {privy, walletOwnerId} from './privy';
 import {verifyOnboardingWallet} from './onboarding/verify-wallet';
 import {handleLogin} from './onboarding/slack-login';
+import {handleReset} from './onboarding/slack-reset';
+import {deleteResetUser} from './onboarding/delete-user';
+import {OnboardingError} from './onboarding/types';
 
 // Route Slack, Privy, and RPC requests through the devbox's outbound proxy.
 setGlobalDispatcher(new EnvHttpProxyAgent());
@@ -16,6 +19,8 @@ setGlobalDispatcher(new EnvHttpProxyAgent());
 type CommandContext = {command: SlashCommand; respond: RespondFn};
 type Balances = Awaited<ReturnType<typeof readBothBalances>>;
 const busyWallets = new Set<string>();
+// Track both sides so a recipient cannot reset while a tip is being submitted.
+const activeTipWallets = new Map<string, number>();
 const usage = 'Usage: /tip demo 1 Thanks for helping! or /tip @coworker 1 Thanks for helping!';
 
 export function escapeSlack(text: string) {
@@ -131,6 +136,8 @@ async function handleTip({command, respond}: CommandContext) {
     return;
   }
   busyWallets.add(sender.walletId);
+  const involvedWallets = [sender.walletId, recipient.walletId];
+  for (const walletId of involvedWallets) activeTipWallets.set(walletId, (activeTipWallets.get(walletId) ?? 0) + 1);
   // Keep the lock if submission or confirmation is uncertain, preventing accidental repeat tips.
   let releaseLock = true;
   try {
@@ -181,7 +188,14 @@ async function handleTip({command, respond}: CommandContext) {
       await replyPrivately(respond, `Tip confirmed, but the channel message failed. <${submitted.explorerUrl}|View transaction>. Do not resend the tip.`);
     }
   } finally {
-    if (releaseLock) busyWallets.delete(sender.walletId);
+    if (releaseLock) {
+      busyWallets.delete(sender.walletId);
+      for (const walletId of involvedWallets) {
+        const remaining = (activeTipWallets.get(walletId) ?? 1) - 1;
+        if (remaining > 0) activeTipWallets.set(walletId, remaining);
+        else activeTipWallets.delete(walletId);
+      }
+    }
   }
 }
 
@@ -205,14 +219,23 @@ async function main() {
     await ack();
     console.log({workspaceId: command.team_id, userId: command.user_id});
     try {
-      if (command.text.trim() === 'login') {
+      if (/^reset(?:\s|$)/.test(command.text.trim())) {
+        await handleReset({command, respond, store: participantStore,
+          deleteUser: userId => deleteResetUser({privy, userId}),
+          isWalletBusy: walletId => activeTipWallets.has(walletId),
+        });
+      } else if (command.text.trim() === 'login') {
         await handleLogin({command, respond, publicOrigin: publicUrl.origin, store: participantStore});
       } else if (/^balance(?:\s|$)/.test(command.text.trim())) {
         await handleBalance({command, respond});
       } else {
         await handleTip({command, respond});
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof OnboardingError) {
+        await replyPrivately(respond, error.message);
+        return;
+      }
       // Don’t turn notification errors into misleading transaction-failure messages.
       console.error('Tip command could not finish responding to Slack. Check transaction status before retrying.');
     }

@@ -12,6 +12,16 @@ export type Participant = {
 /** Slack identity taken only from a signature-verified slash command. */
 export type SlackIdentity = {workspaceId: string; userId: string; name: string};
 
+/** Workspace-scoped Slack account taken from a verified request. */
+export type SlackAccount = Pick<SlackIdentity, 'workspaceId' | 'userId'>;
+
+/** Durable deletion target, retained until Privy deletion is confirmed. */
+export type ResetRequest = {
+  operationId: string;
+  privyUserId: string | null;
+  walletId: string | null;
+};
+
 /** Identity and signing authority read from Privy's backend API. */
 export type VerifiedWallet = {
   privyUserId: string;
