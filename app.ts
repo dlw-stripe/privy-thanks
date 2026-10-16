@@ -3,9 +3,12 @@ import {basename} from 'node:path';
 import {createUiReceiver} from './ui/server';
 import {formatUnits, parseUnits} from 'viem';
 import {EnvHttpProxyAgent, setGlobalDispatcher} from 'undici';
-import {getParticipant, getParticipantByAlias, type Participant} from './participants';
+import {getParticipant, getParticipantByAlias, participantStore, type Participant} from './participants';
 import {client, getOusdBalance} from './wallets/balance';
 import {sendOusd} from './wallets/transfer';
+import {privy, walletOwnerId} from './privy';
+import {verifyOnboardingWallet} from './onboarding/verify-wallet';
+import {handleLogin} from './onboarding/slack-login';
 
 // Route Slack, Privy, and RPC requests through the devbox's outbound proxy.
 setGlobalDispatcher(new EnvHttpProxyAgent());
@@ -44,8 +47,8 @@ export function parseTipCommand(text: string) {
 }
 
 export function validateParticipants(sender: Participant | undefined, recipient: Participant | undefined) {
-  if (!sender) throw new Error('Your Slack account doesn’t have a configured demo wallet yet.');
-  if (!recipient) throw new Error('That recipient doesn’t have a configured demo wallet. Use demo or a registered coworker.');
+  if (!sender) throw new Error('Run /tip login to link your wallet first.');
+  if (!recipient) throw new Error('That coworker needs to run /tip login first. You can also tip demo.');
   if (sender.walletId === recipient.walletId || sender.address.toLowerCase() === recipient.address.toLowerCase()) {
     throw new Error('Choose someone else to tip.');
   }
@@ -91,7 +94,7 @@ async function handleBalance({command, respond}: CommandContext) {
     ? resolveRecipient({workspaceId: command.team_id, target: match[1]})
     : getParticipant({workspaceId: command.team_id, userId: command.user_id});
   if (!participant) {
-    await replyPrivately(respond, 'That Slack account or alias doesn’t have a configured demo wallet yet.');
+    await replyPrivately(respond, 'No wallet is linked yet. Run /tip login, or ask that coworker to log in.');
     return;
   }
   let balance;
@@ -187,15 +190,24 @@ async function main() {
   if (!signingSecret) {
     throw new Error('Missing SLACK_SIGNING_SECRET.');
   }
+  const publicUrl = new URL(process.env.PUBLIC_APP_URL ?? '');
+  if (publicUrl.protocol !== 'https:' || publicUrl.pathname !== '/' || publicUrl.search || publicUrl.hash || publicUrl.username || publicUrl.password) {
+    throw new Error('PUBLIC_APP_URL must be an HTTPS origin.');
+  }
   const app = new App({
     token: process.env.SLACK_BOT_TOKEN,
-    receiver: createUiReceiver({signingSecret}),
+    receiver: createUiReceiver({signingSecret, onboarding: {
+      store: participantStore, publicOrigin: publicUrl.origin, signerId: walletOwnerId,
+      verifyWallet: ({accessToken, address}) => verifyOnboardingWallet({privy, accessToken, address, signerId: walletOwnerId}),
+    }}),
   });
   app.command('/tip', async ({ack, command, respond}) => {
     await ack();
     console.log({workspaceId: command.team_id, userId: command.user_id});
     try {
-      if (/^balance(?:\s|$)/.test(command.text.trim())) {
+      if (command.text.trim() === 'login') {
+        await handleLogin({command, respond, publicOrigin: publicUrl.origin, store: participantStore});
+      } else if (/^balance(?:\s|$)/.test(command.text.trim())) {
         await handleBalance({command, respond});
       } else {
         await handleTip({command, respond});

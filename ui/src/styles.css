@@ -108,6 +108,7 @@ body {
 }
 
 .login-launcher {
+  max-width: 28rem;
   text-align: center;
 }
 

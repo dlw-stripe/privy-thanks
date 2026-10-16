@@ -26,3 +26,6 @@ coverage/
 *.sqlite3
 *.sqlite3-*
 .DS_Store
+
+# Private runtime state
+/data/

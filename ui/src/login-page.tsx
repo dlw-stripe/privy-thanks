@@ -1,5 +1,6 @@
 import {useCreateWallet, useLogin, useModalStatus, usePrivy, useWallets} from '@privy-io/react-auth';
 import {useCallback, useEffect, useRef, useState} from 'react';
+import {useSlackLink} from './use-slack-link';
 
 /** Log in with Google and display the user's embedded Ethereum wallet. */
 export function LoginPage() {
@@ -23,6 +24,10 @@ export function LoginPage() {
   const embeddedWallet = wallets.find(
     (wallet) => wallet.walletClientType === 'privy' && wallet.connectorType === 'embedded',
   );
+  const slackLink = useSlackLink({
+    enabled: ready && authenticated && walletsReady && !loggingOut,
+    address: embeddedWallet?.address,
+  });
 
   const openLogin = useCallback(() => {
     setError(null);
@@ -113,10 +118,19 @@ export function LoginPage() {
           {creatingWallet ? 'Creating wallet…' : 'Create wallet'}
         </button>
       )}
-      <button type="button" className="secondary" onClick={handleLogout} disabled={loggingOut || creatingWallet}>
+      <button type="button" className="secondary" onClick={handleLogout} disabled={loggingOut || creatingWallet || slackLink.busy}>
         {loggingOut ? 'Logging out…' : 'Log out'}
       </button>
-      <p className="status">This wallet is not linked to Slack yet.</p>
+      {!slackLink.hasLink && <p className="status">Run /tip login in Slack to link or check this wallet.</p>}
+      {slackLink.state.phase === 'checking' && <p role="status">Checking wallet ownership…</p>}
+      {slackLink.state.phase === 'authorizing' && <p role="status">Adding bot permission…</p>}
+      {slackLink.state.phase === 'saving' && <p role="status">Linking Slack…</p>}
+      {slackLink.state.phase === 'error' && (
+        <>
+          <p role="alert" className="error">{slackLink.state.message}</p>
+          <button type="button" onClick={slackLink.retry}>Retry wallet setup</button>
+        </>
+      )}
       {error && <p role="alert" className="error">{error}</p>}
     </main>
   );

@@ -4,11 +4,12 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "tsx --test ui/server.test.ts",
+    "test": "tsx --test ui/server.test.ts onboarding/*.test.ts",
     "start": "tsx --env-file=.env app.ts",
     "build:ui": "vite build --config ui/vite.config.mts",
     "check:ui": "tsc --project ui/tsconfig.json",
-    "test:ui": "vitest run --config ui/vitest.config.mts"
+    "test:ui": "vitest run --config ui/vitest.config.mts",
+    "check:backend": "tsc --project tsconfig.json"
   },
   "keywords": [],
   "author": "",
